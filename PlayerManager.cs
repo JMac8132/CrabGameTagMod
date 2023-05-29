@@ -1,0 +1,160 @@
+﻿using HarmonyLib;
+using SteamworksNative;
+using System.Collections.Generic;
+using UnityEngine;
+using static TagMod.Plugin;
+
+namespace TagMod
+{
+    public static class PlayerManager
+    {
+        public static Dictionary<ulong, Player> players = new();
+
+        public class Player
+        {
+            public string Name { get; set; } = "";
+            public ulong SteamID { get; set; } = 0;
+            public Client Client { get; set; } = null;
+            //public Vector3 Position { get; set; } = Vector3.zero;
+            //public Vector3 Rotation { get; set; } = Vector3.zero;
+            //public Vector3 Velocity { get; set; } = Vector3.zero;
+            public Vector3 AfkRotation { get; set; } = Vector3.zero;
+            //public Rigidbody Rigidbody { get; set; } = null;
+            public bool Playing { get; set; } = false;
+            public bool Dead { get; set; } = true;
+            public bool Tagged { get; set; } = false;
+            public bool Afk { get; set; } = false;
+
+            public void Reset()
+            {
+                //Position = Vector3.zero;
+                //Rotation = Vector3.zero;
+                //Velocity = Vector3.zero;
+                AfkRotation = Vector3.zero;
+                //Rigidbody = null;
+                Playing = false;
+                Dead = true;
+                Tagged = false;
+                Afk = false;
+            }
+
+            public Vector3 GetRotation()
+            {
+                if (SteamID == GetMyID()) return PlayerInput.Instance.cameraRot;
+                else return new Vector3(GameManager.Instance.activePlayers[SteamID].field_Private_MonoBehaviourPublicObVeSiVeRiSiAnVeanTrUnique_0.xRot, GameManager.Instance.activePlayers[SteamID].field_Private_MonoBehaviourPublicObVeSiVeRiSiAnVeanTrUnique_0.yRot, 0f);
+            }
+
+            public Rigidbody GetRigidBody()
+            {
+                if (SteamID == GetMyID()) return PlayerMovement.prop_MonoBehaviourPublicGaplfoGaTrorplTrRiBoUnique_0.GetRb();
+                else return GameManager.Instance.activePlayers[SteamID].prop_MonoBehaviourPublicObVeSiVeRiSiAnVeanTrUnique_0.field_Private_Rigidbody_0;
+            }
+        }
+
+        public static void ResetPlayers()
+        {
+            foreach (var player in players.Values)
+            {
+                player.Reset();
+            }
+        }
+
+        public static int GetPlayerCount()
+        {
+            return players.Count;
+        }
+
+        public static Dictionary<ulong, Player> GetAlivePlayers()
+        {
+            Dictionary<ulong, Player> dict = new();
+
+            foreach (var player in players.Values)
+            {
+                if (player.Playing == true && player.Dead == false)
+                {
+                    dict.Add(player.SteamID, player);
+                }
+            }
+            return dict;
+        }
+
+        public static Dictionary<ulong, Player> GetTaggedPlayers()
+        {
+            Dictionary<ulong, Player> dict = new();
+
+            foreach (var player in players.Values)
+            {
+                if (player.Playing == true && player.Dead == false && player.Tagged == true)
+                {
+                    dict.Add(player.SteamID, player);
+                }
+            }
+            return dict;
+        }
+
+        public static Dictionary<ulong, Player> GetNonTaggedPlayers()
+        {
+            Dictionary<ulong, Player> dict = new();
+
+            foreach (var player in players.Values)
+            {
+                if (player.Playing == true && player.Dead == false && player.Tagged == false)
+                {
+                    dict.Add(player.SteamID, player);
+                }
+            }
+            return dict;
+        }
+
+        [HarmonyPatch(typeof(LobbyManager), nameof(LobbyManager.AddPlayerToLobby))]
+        [HarmonyPostfix]
+        public static void LobbyManagerAddPlayerToLobby(CSteamID param_1)
+        {
+            if (players.ContainsKey(param_1.m_SteamID) == false)
+            {
+                Player player = new()
+                {
+                    Name = SteamFriends.GetFriendPersonaName(param_1),
+                    SteamID = param_1.m_SteamID,
+                    Client = LobbyManager.Instance.GetClient(param_1.m_SteamID),
+                };
+                players.Add(param_1.m_SteamID, player);
+                Debug.Log($"{SteamFriends.GetFriendPersonaName(param_1)} joined the server");
+            } 
+        }
+
+        [HarmonyPatch(typeof(LobbyManager), nameof(LobbyManager.RemovePlayerFromLobby))]
+        [HarmonyPostfix]
+        public static void LobbyManagerRemovePlayerFromLobby(CSteamID param_1)
+        {
+            if (players.ContainsKey(param_1.m_SteamID) == true)
+            {
+                players.Remove(param_1.m_SteamID);
+                Debug.Log($"{SteamFriends.GetFriendPersonaName(param_1)} left the server");
+            }
+        }
+
+        [HarmonyPatch(typeof(LobbyManager), nameof(LobbyManager.CloseLobby))]
+        [HarmonyPostfix]
+        public static void LobbyManagerCloseLobby()
+        {
+            players.Clear();
+        }
+
+        [HarmonyPatch(typeof(GameMode), nameof(GameMode.Update))]
+        [HarmonyPostfix]
+        public static void GameModeUpdate()
+        {
+            //if (!GameManger.IsHost() || GameManger.gameState != GameState.Playing) return;
+
+            /*foreach (var player in players.Values)
+            {
+                if (player == null || player.Dead == true || player.Playing == false) continue;
+
+                player.Position = player.GetPostion();
+                player.Rotation = player.GetRotation();
+                player.Velocity = player.GetVelocity();
+            }*/
+        }
+    }
+}
