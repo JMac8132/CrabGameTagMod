@@ -654,7 +654,7 @@ namespace TagMod
             {
                 numOfTaggers = 1;
             }
-            else if (alivePlayers.Count >= 4 || alivePlayers.Count <= 7)
+            else if (alivePlayers.Count >= 4 && alivePlayers.Count <= 7)
             {
                 numOfTaggers = 2;
             }
