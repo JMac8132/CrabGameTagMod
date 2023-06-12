@@ -8,10 +8,11 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text.RegularExpressions;
 using System.Linq;
+using static TagMod.PlayerManager;
 
 namespace TagMod
 {
-    [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, "1.5.0")]
+    [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, "1.6.0")]
     public class Plugin : BasePlugin
     {
         public struct MapInfo
@@ -39,15 +40,14 @@ namespace TagMod
         public static bool canStartGame = true;
         public static bool canEndGame = true;
         public static bool canAfkCheck = true;
-        public static bool canRespawnPlayers = true;
         public static bool toggleAutoStart = true;
         public static bool toggleAfk = false;
         public static bool toggleSnowballs = false;
         public static int prevMapID = 0;
-        public static string lastServerMessage;
         public static float afkTimer = 0;
         public static Dictionary<int, MapInfo> mapDictionary = new();
         public static int randomMapID = 0;
+        public static int[] walledMapIDs = { 1, 3, 6, 7, 9, 10, 14, 17, 18, 19, 21, 22, 23, 25, 28, 30, 31, 32, 34, 37, 39, 40 };
 
         public override void Load()
         {
@@ -197,7 +197,7 @@ namespace TagMod
 
         public static void BoundsCheck(ulong id)
         {
-            float maxDistance = 0f;
+            /*float maxDistance = 0f;
 
             switch (prevMapID)
             {
@@ -377,21 +377,24 @@ namespace TagMod
                     break;
             }
 
-            if (Vector3.Distance(PlayerManager.players[id].GetRigidBody().position, Vector3.zero) > maxDistance)
+            if (Vector3.Distance(players[id].GetRigidBody().position, Vector3.zero) > maxDistance)
             {
                 GameServer.PlayerDied(id, 1, Vector3.zero);
                 //ServerSend.RespawnPlayer(id, Vector3.zero);
-            }
-
-            /*if (GetPlayerRigidBody(id).position.y <= -100)
-            {
-                ServerSend.RespawnPlayer(id, Vector3.zero);
             }*/
+
+            Vector3 playerPos = players[id].GetRigidBody().position;
+
+            if (walledMapIDs.Contains(prevMapID) && playerPos.y <= -55)
+            {
+                ServerSend.SendChatMessage(1, $"{players[id].Name} was respawned due to falling under the map.");
+                GameServer.Instance.QueueRespawn(players[id].SteamID, 0);
+            }
         }
 
         public static void GlitchingCheck(ulong id)
         {
-            Vector3 playerPosition = PlayerManager.players[id].GetRigidBody().position;
+            Vector3 playerPosition = players[id].GetRigidBody().position;
 
             if (prevMapID == 3)// Big Color Climb
             {
@@ -453,12 +456,12 @@ namespace TagMod
             randomMapID = 0;
 
             int nextRoundPlayerCount;
-            int alivePlayerCount = PlayerManager.GetAlivePlayers().Count;
+            int alivePlayerCount = GetAlivePlayers().Count;
 
             if (alivePlayerCount <= 1)
             {
                 canRespawnPlayers = true;
-                nextRoundPlayerCount = PlayerManager.GetPlayerCount();
+                nextRoundPlayerCount = GetPlayerCount();
                 if (toggleAfk) nextRoundPlayerCount--;
             }
             else
@@ -487,7 +490,7 @@ namespace TagMod
                 }
             }
 
-            PlayerManager.ResetPlayers();
+            ResetPlayers();
             GameLoop.Instance.ResetAllInventories();
 
             prevMapID = randomMapID;
@@ -498,7 +501,7 @@ namespace TagMod
         {
             if (!IsHost() || gameState != GameState.Playing) return;
 
-            if (PlayerManager.GetTaggedPlayers().Count == 0 || PlayerManager.GetNonTaggedPlayers().Count == 0 || PlayerManager.GetAlivePlayers().Count <= 1)
+            if (GetTaggedPlayers().Count == 0 || GetNonTaggedPlayers().Count == 0 || GetAlivePlayers().Count <= 1)
             {
                 ServerSend.GameOver(0);
                 Debug.Log("Game Over");
@@ -535,7 +538,7 @@ namespace TagMod
             if (!IsHost()) return;
 
             // Start Game
-            if (canStartGame && toggleAutoStart && gameState == GameState.Lobby && (PlayerManager.GetAlivePlayers().Count >= 2 && !toggleAfk || PlayerManager.GetAlivePlayers().Count >= 3 && toggleAfk))
+            if (canStartGame && toggleAutoStart && gameState == GameState.Lobby && (GetAlivePlayers().Count >= 2 && !toggleAfk || GetAlivePlayers().Count >= 3 && toggleAfk))
             {
                 ChangeMap();
                 canStartGame = false;
@@ -560,7 +563,7 @@ namespace TagMod
 
             if (gameState == GameState.Playing)
             {
-                var alivePlayers = PlayerManager.GetAlivePlayers();
+                var alivePlayers = GetAlivePlayers();
 
                 // Check Player Positions
                 foreach (var player in alivePlayers.Values)
@@ -575,38 +578,24 @@ namespace TagMod
                 {
                     foreach (var player in alivePlayers.Values)
                     {
-                        if (player.GetRotation() == PlayerManager.players[player.SteamID].AfkRotation)
+                        if (player.GetRotation() == player.AfkRotation)
                         {
+                            player.RoundsAfk++;
                             player.Afk = true;
-                            GameServer.PlayerDied(player.SteamID, 1, Vector3.zero);
+
+                            if (player.RoundsAfk >= 2 && player.SteamID != GetMyID())
+                            {
+                                ServerSend.SendChatMessage(1, $"{player.Name} was kicked for being afk 2 rounds in a row");
+                                LobbyManager.Instance.KickPlayer(player.SteamID);
+                            }
+                            else
+                            {
+                                GameServer.PlayerDied(player.SteamID, 1, Vector3.zero);
+                            }    
                         }
                     }
                     canAfkCheck = false;
                 }
-            }
-        }
-
-        [HarmonyPatch(typeof(ServerHandle), nameof(ServerHandle.GameRequestToSpawn))]
-        [HarmonyPrefix]
-        public static void ServerHandleGameRequestToSpawn(ulong param_0)
-        {
-            if (!IsHost()) return;
-
-            if (canRespawnPlayers) PlayerManager.players[param_0].Client.field_Public_Boolean_0 = true; // active player
-            if (toggleAfk && param_0 == GetMyID()) PlayerManager.players[param_0].Client.field_Public_Boolean_0 = false; // active player
-        }
-
-        [HarmonyPatch(typeof(GameManager), nameof(GameManager.SpawnPlayer))]
-        [HarmonyPostfix]
-        public static void ServerSendGameSpawnPlayer(ulong param_1)
-        {
-            if (!IsHost()) return;
-
-            if (PlayerManager.players.ContainsKey(param_1))
-            {
-                PlayerManager.players[param_1].Playing = true;
-                PlayerManager.players[param_1].Dead = false;
-                //PlayerManager.players[param_1].Rigidbody = PlayerManager.players[param_1].GetRigidBody();
             }
         }
 
@@ -645,19 +634,19 @@ namespace TagMod
             return false;
         }*/
 
-        [HarmonyPatch(typeof(GameModeTag), nameof(GameModeTag.OnFreezeOver))]
-        [HarmonyPrefix]
-        public static bool GameModeTagOnFreezeOver()
+        [HarmonyPatch(typeof(GameMode), nameof(GameMode.Method_Private_Void_0))]
+        [HarmonyPostfix]
+        public static void GameModeStartRound()
         {
-            if (!IsHost() || GetModeID() != 4) return true;
+            if (!IsHost() || GetModeID() != 4) return;
 
-            var alivePlayers = PlayerManager.GetAlivePlayers();
+            var alivePlayers = GetAlivePlayers();
 
-            if (alivePlayers.Count <= 1 || (toggleAfk && alivePlayers.ContainsKey(GetMyID()) && alivePlayers.Count <= 2))
+            if (alivePlayers.Count <= 1)
             {
                 ServerSend.GameOver(0);
                 Debug.Log("Game Over");
-                return false;
+                return;
             }
 
             int numOfTaggers;
@@ -665,21 +654,13 @@ namespace TagMod
             {
                 numOfTaggers = 1;
             }
-            else if (alivePlayers.Count == 4 || alivePlayers.Count == 5)
+            else if (alivePlayers.Count >= 4 || alivePlayers.Count <= 7)
             {
                 numOfTaggers = 2;
             }
-            else if (alivePlayers.Count == 6 || alivePlayers.Count == 7)
-            {
-                numOfTaggers = 3;
-            }
-            else if (alivePlayers.Count == 8 || alivePlayers.Count == 9)
-            {
-                numOfTaggers = 4;
-            }
             else
             {
-                numOfTaggers = 5;
+                numOfTaggers = 3;
             }
 
             var tempAlivePlayers = alivePlayers.Values.ToList();
@@ -701,7 +682,15 @@ namespace TagMod
 
             canRespawnPlayers = false;
 
-            return false;
+            return;
+        }
+
+        [HarmonyPatch(typeof(GameModeTag), nameof(GameModeTag.OnFreezeOver))]
+        [HarmonyPrefix]
+        public static bool GameModeTagOnFreezeOver()
+        {
+            if (!IsHost() || GetModeID() != 4) return true;
+            else return false;
         }
 
         [HarmonyPatch(typeof(GameModeTag), nameof(GameModeTag.OnRoundOver))]
@@ -710,8 +699,8 @@ namespace TagMod
         {
             if (!IsHost() || GetModeID() != 4) return true;
 
-            var taggedPlayers = PlayerManager.GetTaggedPlayers();
-            var nonTaggedPlayers = PlayerManager.GetTaggedPlayers();
+            var taggedPlayers = GetTaggedPlayers();
+            var nonTaggedPlayers = GetNonTaggedPlayers();
 
             if (nonTaggedPlayers.Count > 0 && taggedPlayers.Count > 0)
             {
@@ -721,7 +710,7 @@ namespace TagMod
                 }
             }
 
-            var alivePlayers = PlayerManager.GetAlivePlayers().ToList();
+            var alivePlayers = GetAlivePlayers().ToList();
 
             if (alivePlayers.Count == 1)
             {
@@ -739,14 +728,14 @@ namespace TagMod
         {
             if (!IsHost() || GetModeID() != 4) return;
 
-            PlayerManager.players[param_1].Tagged = true;
+            players[param_1].Tagged = true;
             if (param_0 == 0) return;
-            PlayerManager.players[param_0].Tagged = false;
+            players[param_0].Tagged = false;
 
-            int distance = (int)Vector3.Distance(PlayerManager.players[param_0].GetRigidBody().position, PlayerManager.players[param_1].GetRigidBody().position);
+            int distance = (int)Vector3.Distance(players[param_0].GetRigidBody().position, players[param_1].GetRigidBody().position);
             if (distance > 8)
             {
-                ServerSend.SendChatMessage(1, $"{PlayerManager.players[param_0].Name} tagged {PlayerManager.players[param_1].Name} from a distance of {distance}");
+                ServerSend.SendChatMessage(1, $"{players[param_0].Name} tagged {players[param_1].Name} from a distance of {distance}");
             }
         }
 
@@ -766,7 +755,7 @@ namespace TagMod
         {
             if (!IsHost() || GetModeID() != 4) return true;
 
-            if (PlayerManager.GetAlivePlayers().Count >= 2)
+            if (GetAlivePlayers().Count >= 2)
             {
                 ChangeMap();
             }
@@ -784,7 +773,7 @@ namespace TagMod
         {
             if (!IsHost() || GetModeID() != 4) return true;
 
-            if (toggleAutoStart && ((toggleAfk && PlayerManager.GetPlayerCount() > 2) || (!toggleAfk && PlayerManager.GetPlayerCount() > 1)))
+            if (toggleAutoStart && ((toggleAfk && GetPlayerCount() > 2) || (!toggleAfk && GetPlayerCount() > 1)))
             {
                 ChangeMap();
                 Debug.Log("Started New Game");
@@ -803,7 +792,7 @@ namespace TagMod
         {
             if (!IsHost() || GetModeID() != 4) return true;
 
-            if (toggleAutoStart && ((toggleAfk && PlayerManager.GetPlayerCount() > 2) || (!toggleAfk && PlayerManager.GetPlayerCount() > 1)))
+            if (toggleAutoStart && ((toggleAfk && GetPlayerCount() > 2) || (!toggleAfk && GetPlayerCount() > 1)))
             {
                 ChangeMap();
                 Debug.Log("Started New Game");
@@ -819,17 +808,17 @@ namespace TagMod
         {
             if (!IsHost() || GetModeID() != 4) return;
 
-            if (PlayerManager.players[param_1].Afk == true)
+            if (players[param_1].Afk == true)
             {
-                ServerSend.SendChatMessage(1, $"{PlayerManager.players[param_1].Name} was killed for being afk");
+                ServerSend.SendChatMessage(1, $"{players[param_1].Name} was killed for being afk");
             }
             else
             {
-                ServerSend.SendChatMessage(1, $"{PlayerManager.players[param_1].Name} died");
+                ServerSend.SendChatMessage(1, $"{players[param_1].Name} died");
             }
 
-            PlayerManager.players[param_1].Dead = true;
-            PlayerManager.players[param_1].Tagged = false;
+            players[param_1].Dead = true;
+            players[param_1].Tagged = false;
 
             CheckGameOver();
         }
@@ -840,14 +829,6 @@ namespace TagMod
         {
             if (IsHost() && param_1 == 9 && !toggleSnowballs) return false;
             else return true;
-        }
-
-        [HarmonyPatch(typeof(LobbyManager), nameof(LobbyManager.OnPlayerJoinLeaveUpdate))]
-        [HarmonyPostfix]
-        public static void LobbyManagerOnPlayerJoinLeaveUpdate(CSteamID param_1, bool param_2)
-        {
-            if (!IsHost() || param_2 == true) return;
-            CheckGameOver();
         }
 
         [HarmonyPatch(typeof(ServerSend), nameof(ServerSend.SendChatMessage))]

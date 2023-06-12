@@ -9,29 +9,24 @@ namespace TagMod
     public static class PlayerManager
     {
         public static Dictionary<ulong, Player> players = new();
+        public static bool canRespawnPlayers = true;
 
         public class Player
         {
             public string Name { get; set; } = "";
             public ulong SteamID { get; set; } = 0;
             public Client Client { get; set; } = null;
-            //public Vector3 Position { get; set; } = Vector3.zero;
-            //public Vector3 Rotation { get; set; } = Vector3.zero;
-            //public Vector3 Velocity { get; set; } = Vector3.zero;
+            public int PlayerNumber { get; set; } = 0;
             public Vector3 AfkRotation { get; set; } = Vector3.zero;
-            //public Rigidbody Rigidbody { get; set; } = null;
             public bool Playing { get; set; } = false;
             public bool Dead { get; set; } = true;
             public bool Tagged { get; set; } = false;
             public bool Afk { get; set; } = false;
+            public int RoundsAfk { get; set; } = 0;
 
             public void Reset()
             {
-                //Position = Vector3.zero;
-                //Rotation = Vector3.zero;
-                //Velocity = Vector3.zero;
                 AfkRotation = Vector3.zero;
-                //Rigidbody = null;
                 Playing = false;
                 Dead = true;
                 Tagged = false;
@@ -117,6 +112,7 @@ namespace TagMod
                     Name = SteamFriends.GetFriendPersonaName(param_1),
                     SteamID = param_1.m_SteamID,
                     Client = LobbyManager.Instance.GetClient(param_1.m_SteamID),
+                    PlayerNumber = LobbyManager.steamIdToUID[param_1.m_SteamID] + 1,
                 };
                 players.Add(param_1.m_SteamID, player);
                 Debug.Log($"{SteamFriends.GetFriendPersonaName(param_1)} joined the server");
@@ -131,6 +127,7 @@ namespace TagMod
             {
                 players.Remove(param_1.m_SteamID);
                 Debug.Log($"{SteamFriends.GetFriendPersonaName(param_1)} left the server");
+                CheckGameOver();
             }
         }
 
@@ -141,20 +138,24 @@ namespace TagMod
             players.Clear();
         }
 
-        [HarmonyPatch(typeof(GameMode), nameof(GameMode.Update))]
-        [HarmonyPostfix]
-        public static void GameModeUpdate()
+        [HarmonyPatch(typeof(ServerHandle), nameof(ServerHandle.GameRequestToSpawn))]
+        [HarmonyPrefix]
+        public static void ServerHandleGameRequestToSpawn(ulong param_0)
         {
-            //if (!GameManger.IsHost() || GameManger.gameState != GameState.Playing) return;
+            if (!IsHost()) return;
 
-            /*foreach (var player in players.Values)
-            {
-                if (player == null || player.Dead == true || player.Playing == false) continue;
+            if (canRespawnPlayers) players[param_0].Client.field_Public_Boolean_0 = true; // active player
+            if (toggleAfk && param_0 == GetMyID()) players[param_0].Client.field_Public_Boolean_0 = false; // active player
+        }
 
-                player.Position = player.GetPostion();
-                player.Rotation = player.GetRotation();
-                player.Velocity = player.GetVelocity();
-            }*/
+        [HarmonyPatch(typeof(GameManager), nameof(GameManager.SpawnPlayer))]
+        [HarmonyPostfix]
+        public static void GameManagerSpawnPlayer(ulong param_1)
+        {
+            if (!IsHost()) return;
+
+            players[param_1].Playing = true;
+            players[param_1].Dead = false;
         }
     }
 }
