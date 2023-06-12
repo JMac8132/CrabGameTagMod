@@ -593,6 +593,10 @@ namespace TagMod
                                 GameServer.PlayerDied(player.SteamID, 1, Vector3.zero);
                             }    
                         }
+                        else
+                        {
+                            player.RoundsAfk = 0;
+                        }
                     }
                     canAfkCheck = false;
                 }
